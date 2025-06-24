@@ -1,0 +1,5 @@
+[server]
+headless = true
+
+[python]
+use_uv = false
