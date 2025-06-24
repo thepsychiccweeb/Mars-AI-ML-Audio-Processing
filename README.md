@@ -11,6 +11,18 @@ This project implements an end-to-end pipeline for recognizing emotions from spe
 - **8 Emotions**: Happy, Sad, Angry, Fearful, Surprised, Disgust, Neutral, Calm
 - **Audio Format**: High-quality WAV files with controlled recording conditions
 
+## Model Architecture
+### ResNet Implementation
+Our custom ResNet architecture includes:
+- **Input Layer**: Accepts 45 extracted audio features
+- **Residual Blocks**: 3 blocks with skip connections to prevent vanishing gradients
+- **Dense Layers**: 128, 64, 32 neurons with ReLU activation and batch normalization
+- **Skip Connections**: Add input to output of each block, enabling deeper training
+- **Regularization**: Dropout (0.3-0.5) and L2 regularization to prevent overfitting
+- **Output Layer**: 8 neurons with softmax activation for emotion classification
+
+The ResNet architecture allows for deeper networks while maintaining gradient flow through skip connections, crucial for learning complex emotion patterns from audio features.
+
 ## Features
 - **Audio Processing**: Extracts 45 key features including MFCC, spectral features, chroma, and contrast
 - **Multiple Models**: Implements MLP and ResNet architectures for comparison
@@ -27,11 +39,16 @@ This project implements an end-to-end pipeline for recognizing emotions from spe
 6. **Deployment**: Streamlit app for interactive emotion prediction
 
 ## Results
-- **Final Test Accuracy**: 83.83% on RAVDESS dataset
+- **Final Test Accuracy**: ~75-80% on RAVDESS dataset
 - **Best Model**: ResNet architecture with enhanced feature engineering
 - **Generalization Gap**: <10% indicating good model generalization
 - **Cross-Validation**: Consistent performance across multiple folds
 - **Confusion Matrix**: Strong performance on distinct emotions (angry, happy, sad) with some confusion between similar emotions (calm/neutral)
+
+## Supported Emotions
+Happy, Sad, Angry, Fearful, Surprised, Disgust, Neutral, Calm
+
+The system demonstrates robust emotion recognition capabilities suitable for real-world applications in speech emotion analysis.
 
 ## Supported Emotions
 Happy, Sad, Angry, Fearful, Surprised, Disgust, Neutral, Calm
