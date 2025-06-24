@@ -7,35 +7,23 @@ import os
 import pickle
 
 # Configure page
-st.set_page_config(page_title="Emotion Recognition", page_icon="🎭")
-
-@st.cache_resource
-def load_model_and_preprocessing():
-    """Load model and preprocessing objects"""
-    try:
-        # Load model
-        model = tf.keras.models.load_model('final_emotion_model_1.keras')
-        
-        # Load preprocessing objects
-        with open('preprocessing_objects.pkl', 'rb') as f:
-            preprocessing = pickle.load(f)
-        
-        return model, preprocessing
-    except Exception as e:
-        st.error(f"Error loading model/preprocessing: {e}")
-        return None, None
+st.set_page_config(
+    page_title="Emotion Recognition", 
+    page_icon="🎭",
+    layout="wide"
+)
 
 def extract_simple_features(file_path, duration=3.0, sr=22050):
-    """Extract exactly 45 features - EXACT copy from your notebook"""
+    """Extract exactly 45 features - matching training pipeline"""
     try:
         # Load audio
         y, sr = librosa.load(file_path, sr=sr, duration=duration)
         
-        # If audio is shorter than expected duration, pad with zeros
+        # Pad if shorter than expected duration
         if len(y) < duration * sr:
             y = np.pad(y, (0, int(duration * sr) - len(y)), 'constant')
         
-        # 1. MFCC (20 features - mean + std of 10 coefficients)
+        # 1. MFCC (20 features: 10 mean + 10 std)
         mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=10)
         mfcc_mean = np.mean(mfcc, axis=1)
         mfcc_std = np.std(mfcc, axis=1)
@@ -68,192 +56,297 @@ def extract_simple_features(file_path, duration=3.0, sr=22050):
         spectral_contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
         contrast_mean = np.mean(spectral_contrast, axis=1)[:5]
         
-        # Combine all features to exactly 45
+        # Combine all features (total: 45)
         features = np.concatenate([
-            mfcc_mean, mfcc_std,           # 20 features (10+10)
-            [zcr_mean, zcr_std, rmse_mean, rmse_std, sc_mean, sc_std, sr_mean, sr_std],  # 8 features
-            chroma_mean,                   # 12 features
-            contrast_mean                  # 5 features
+            mfcc_mean,      # 10 features
+            mfcc_std,       # 10 features
+            [zcr_mean, zcr_std, rmse_mean, rmse_std, 
+             sc_mean, sc_std, sr_mean, sr_std],  # 8 features
+            chroma_mean,    # 12 features
+            contrast_mean   # 5 features
         ])
         
-        return features  # Total: 45 features (20+8+12+5)
+        # Handle any NaN or infinite values
+        features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        return features
         
     except Exception as e:
-        st.error(f"Error extracting features: {e}")
+        st.error(f"Error extracting features: {str(e)}")
         return np.zeros(45)
 
-def preprocess_features(features, preprocessing):
+@st.cache_resource
+def load_model_components():
+    """Load model and preprocessing components"""
+    try:
+        # Try to load the complete package first
+        try:
+            with open('complete_model_package.pkl', 'rb') as f:
+                package = pickle.load(f)
+            return (
+                package['model'], 
+                package['selector'], 
+                package['scaler'], 
+                package['label_encoder']
+            )
+        except FileNotFoundError:
+            # Fallback: load individual files
+            model = tf.keras.models.load_model('final_emotion_model_1.keras')
+            
+            with open('preprocessing_objects.pkl', 'rb') as f:
+                preprocessing = pickle.load(f)
+            
+            return (
+                model,
+                preprocessing['selector'],
+                preprocessing['scaler'], 
+                preprocessing['label_encoder']
+            )
+            
+    except Exception as e:
+        st.error(f"Error loading model components: {str(e)}")
+        return None, None, None, None
+
+def preprocess_features(features, selector, scaler):
     """Apply the same preprocessing as training"""
     try:
-        # Reshape for sklearn
-        features = features.reshape(1, -1)
+        # Reshape for sklearn (expects 2D array)
+        features_reshaped = features.reshape(1, -1)
         
-        # Apply feature selection (SelectKBest)
-        features_selected = preprocessing['selector'].transform(features)
+        # Apply feature selection
+        features_selected = selector.transform(features_reshaped)
         
-        # Apply scaling (StandardScaler)
-        features_scaled = preprocessing['scaler'].transform(features_selected)
+        # Apply scaling
+        features_scaled = scaler.transform(features_selected)
         
         return features_scaled
+        
     except Exception as e:
-        st.error(f"Error preprocessing features: {e}")
+        st.error(f"Error preprocessing features: {str(e)}")
         return None
 
-def predict_emotion(model, preprocessing, features):
-    """Make prediction using exact same pipeline as training"""
+def predict_emotion(model, selector, scaler, label_encoder, audio_path):
+    """Complete prediction pipeline"""
     try:
-        # Preprocess features
-        processed_features = preprocess_features(features, preprocessing)
+        # Step 1: Extract raw features
+        raw_features = extract_simple_features(audio_path)
+        
+        if raw_features is None:
+            return None, None, None, None
+        
+        # Step 2: Preprocess features
+        processed_features = preprocess_features(raw_features, selector, scaler)
         
         if processed_features is None:
-            return None, None, None
+            return None, None, None, None
         
-        # Make prediction
+        # Step 3: Make prediction
         prediction = model.predict(processed_features, verbose=0)
         
-        # Get results
+        # Step 4: Extract results
         predicted_class = np.argmax(prediction[0])
         confidence = float(prediction[0][predicted_class])
-        emotion = preprocessing['label_encoder'].classes_[predicted_class]
+        emotion = label_encoder.classes_[predicted_class]
         
-        # Get all probabilities
+        # Get all emotion probabilities
         emotion_probs = {}
-        for i, emotion_name in enumerate(preprocessing['label_encoder'].classes_):
+        for i, emotion_name in enumerate(label_encoder.classes_):
             emotion_probs[emotion_name] = float(prediction[0][i])
         
-        return emotion, confidence, emotion_probs
+        # Debug information
+        debug_info = {
+            'raw_features_shape': raw_features.shape,
+            'raw_features_stats': {
+                'min': float(np.min(raw_features)),
+                'max': float(np.max(raw_features)),
+                'mean': float(np.mean(raw_features)),
+                'std': float(np.std(raw_features))
+            },
+            'processed_features_shape': processed_features.shape,
+            'processed_features_stats': {
+                'min': float(np.min(processed_features)),
+                'max': float(np.max(processed_features)),
+                'mean': float(np.mean(processed_features)),
+                'std': float(np.std(processed_features))
+            }
+        }
+        
+        return emotion, confidence, emotion_probs, debug_info
         
     except Exception as e:
-        st.error(f"Error making prediction: {e}")
-        return None, None, None
+        st.error(f"Error in prediction pipeline: {str(e)}")
+        return None, None, None, None
 
-# Main app
-st.title("🎭 Emotion Recognition from Audio")
-st.write("Upload a WAV file to detect emotion using your trained model")
-
-# Load model and preprocessing
-model, preprocessing = load_model_and_preprocessing()
-
-if model is None or preprocessing is None:
-    st.error("❌ Could not load model or preprocessing objects.")
-    st.info("Make sure these files are in the same directory:")
-    st.write("- final_emotion_model_1.keras")
-    st.write("- preprocessing_objects.pkl")
-    st.stop()
-
-st.success("✅ Model and preprocessing loaded successfully!")
-st.info(f"Model expects {model.input_shape[1]} features after preprocessing")
-
-# File upload
-uploaded_file = st.file_uploader("Choose a WAV file", type=['wav'])
-
-if uploaded_file is not None:
-    st.success(f"✅ File uploaded: {uploaded_file.name}")
+def main():
+    # App header
+    st.title("🎭 Audio Emotion Recognition")
+    st.markdown("Upload a WAV file to detect the emotion using deep learning")
     
-    if st.button("🎯 Predict Emotion", type="primary"):
-        with st.spinner("Processing audio..."):
-            # Save uploaded file temporarily
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-                tmp_file.write(uploaded_file.getvalue())
-                tmp_file_path = tmp_file.name
-            
-            try:
-                # Extract features using your exact function
-                features = extract_simple_features(tmp_file_path)
+    # Load model components
+    with st.spinner("Loading model..."):
+        model, selector, scaler, label_encoder = load_model_components()
+    
+    if model is None:
+        st.error("❌ Failed to load model components")
+        st.info("Required files:")
+        st.write("- `complete_model_package.pkl` OR")
+        st.write("- `final_emotion_model_1.keras` + `preprocessing_objects.pkl`")
+        st.stop()
+    
+    st.success("✅ Model loaded successfully!")
+    
+    # Model info
+    with st.expander("ℹ️ Model Information"):
+        st.write(f"**Input Shape:** {model.input_shape}")
+        st.write(f"**Output Shape:** {model.output_shape}")
+        st.write(f"**Supported Emotions:** {', '.join(label_encoder.classes_)}")
+        st.write(f"**Total Parameters:** {model.count_params():,}")
+    
+    # File upload
+    st.markdown("---")
+    uploaded_file = st.file_uploader(
+        "Choose a WAV audio file", 
+        type=['wav'],
+        help="Upload a 2-5 second audio clip for best results"
+    )
+    
+    if uploaded_file is not None:
+        # Show file info
+        st.success(f"✅ File uploaded: {uploaded_file.name}")
+        
+        # Audio player
+        st.audio(uploaded_file, format='audio/wav')
+        
+        # Prediction button
+        if st.button("🎯 Analyze Emotion", type="primary", use_container_width=True):
+            with st.spinner("Analyzing audio... This may take a few seconds."):
+                # Save uploaded file temporarily
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_file_path = tmp_file.name
                 
-                st.success(f"✅ Extracted {len(features)} features")
-                
-                # Show feature stats
-                with st.expander("🔍 Feature Statistics"):
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Min", f"{np.min(features):.4f}")
-                    with col2:
-                        st.metric("Max", f"{np.max(features):.4f}")
-                    with col3:
-                        st.metric("Mean", f"{np.mean(features):.4f}")
-                    with col4:
-                        st.metric("Std", f"{np.std(features):.4f}")
-                
-                # Make prediction
-                emotion, confidence, emotion_probs = predict_emotion(model, preprocessing, features)
-                
-                if emotion is not None:
-                    # Display results
-                    st.markdown("---")
+                try:
+                    # Make prediction
+                    emotion, confidence, emotion_probs, debug_info = predict_emotion(
+                        model, selector, scaler, label_encoder, tmp_file_path
+                    )
                     
-                    # Emoji mapping
-                    emoji_map = {
-                        'happy': '😊', 'sad': '😢', 'angry': '😠', 'fearful': '😨',
-                        'surprised': '😲', 'disgust': '🤢', 'neutral': '😐', 'calm': '😌'
-                    }
-                    
-                    emoji = emoji_map.get(emotion, '🎭')
-                    
-                    # Main result
-                    col1, col2 = st.columns([2, 1])
-                    with col1:
-                        st.markdown(f"## {emoji} **{emotion.upper()}**")
-                    with col2:
-                        st.metric("Confidence", f"{confidence*100:.1f}%")
-                    
-                    # Confidence bar
-                    st.progress(min(confidence, 1.0))
-                    
-                    # Confidence interpretation
-                    if confidence >= 0.8:
-                        st.success("🎯 Very high confidence!")
-                    elif confidence >= 0.6:
-                        st.success("✅ High confidence!")
-                    elif confidence >= 0.4:
-                        st.warning("⚠️ Moderate confidence")
-                    else:
-                        st.info("❓ Low confidence")
-                    
-                    # All emotion probabilities
-                    with st.expander("📊 All Emotion Probabilities"):
+                    if emotion is not None:
+                        # Display results
+                        st.markdown("---")
+                        st.markdown("## 🎯 Prediction Results")
+                        
+                        # Emotion mapping
+                        emoji_map = {
+                            'happy': '😊', 'sad': '😢', 'angry': '😠', 'fearful': '😨',
+                            'surprised': '😲', 'disgust': '🤢', 'neutral': '😐', 'calm': '😌'
+                        }
+                        
+                        emotion_emoji = emoji_map.get(emotion, '🎭')
+                        
+                        # Main result display
+                        col1, col2, col3 = st.columns([2, 1, 1])
+                        
+                        with col1:
+                            st.markdown(f"### {emotion_emoji} **{emotion.upper()}**")
+                        
+                        with col2:
+                            st.metric("Confidence", f"{confidence*100:.1f}%")
+                        
+                        with col3:
+                            # Confidence level
+                            if confidence >= 0.8:
+                                st.success("Very High")
+                            elif confidence >= 0.6:
+                                st.success("High")
+                            elif confidence >= 0.4:
+                                st.warning("Moderate")
+                            else:
+                                st.error("Low")
+                        
+                        # Confidence bar
+                        st.progress(min(confidence, 1.0))
+                        
+                        # All emotion probabilities
+                        st.markdown("### 📊 All Emotion Probabilities")
+                        
+                        # Sort emotions by probability
                         sorted_emotions = sorted(emotion_probs.items(), key=lambda x: x[1], reverse=True)
+                        
+                        # Create columns for better layout
+                        cols = st.columns(2)
                         
                         for i, (emo, prob) in enumerate(sorted_emotions):
                             emo_emoji = emoji_map.get(emo, '🎭')
-                            if i == 0:  # Top prediction
-                                st.markdown(f"**{emo_emoji} {emo.capitalize()}: {prob*100:.2f}%** 🏆")
-                            else:
-                                st.write(f"{emo_emoji} {emo.capitalize()}: {prob*100:.2f}%")
+                            col_idx = i % 2
+                            
+                            with cols[col_idx]:
+                                if i == 0:  # Highest probability
+                                    st.markdown(f"**{emo_emoji} {emo.capitalize()}: {prob*100:.2f}%** 🏆")
+                                else:
+                                    st.write(f"{emo_emoji} {emo.capitalize()}: {prob*100:.2f}%")
+                        
+                        # Technical details
+                        with st.expander("🔧 Technical Details"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.write("**Raw Features:**")
+                                st.write(f"Shape: {debug_info['raw_features_shape']}")
+                                st.write(f"Min: {debug_info['raw_features_stats']['min']:.4f}")
+                                st.write(f"Max: {debug_info['raw_features_stats']['max']:.4f}")
+                                st.write(f"Mean: {debug_info['raw_features_stats']['mean']:.4f}")
+                                st.write(f"Std: {debug_info['raw_features_stats']['std']:.4f}")
+                            
+                            with col2:
+                                st.write("**Processed Features:**")
+                                st.write(f"Shape: {debug_info['processed_features_shape']}")
+                                st.write(f"Min: {debug_info['processed_features_stats']['min']:.4f}")
+                                st.write(f"Max: {debug_info['processed_features_stats']['max']:.4f}")
+                                st.write(f"Mean: {debug_info['processed_features_stats']['mean']:.4f}")
+                                st.write(f"Std: {debug_info['processed_features_stats']['std']:.4f}")
                     
-                    # Technical details
-                    with st.expander("🔧 Technical Details"):
-                        st.write(f"**Raw Features:** {len(features)}")
-                        st.write(f"**Selected Features:** {len(preprocessing['selected_indices'])}")
-                        st.write(f"**Model Input Shape:** {model.input_shape}")
-                        st.write(f"**Preprocessing Pipeline:** Feature Selection → Standard Scaling")
-                        st.write(f"**Supported Emotions:** {', '.join(preprocessing['label_encoder'].classes_)}")
+                    else:
+                        st.error("❌ Failed to analyze the audio file")
+                        st.info("Please try with a different audio file")
                 
-                else:
-                    st.error("❌ Failed to make prediction")
-                    
-            except Exception as e:
-                st.error(f"❌ Error processing audio: {e}")
-            
-            finally:
-                # Clean up
-                if os.path.exists(tmp_file_path):
-                    os.unlink(tmp_file_path)
+                except Exception as e:
+                    st.error(f"❌ Error processing audio: {str(e)}")
+                
+                finally:
+                    # Clean up temporary file
+                    if os.path.exists(tmp_file_path):
+                        os.unlink(tmp_file_path)
+    
+    # Instructions and tips
+    st.markdown("---")
+    st.markdown("### 📋 How to Use")
+    st.markdown("""
+    1. **Upload** a WAV audio file (2-5 seconds recommended)
+    2. **Listen** to the audio using the player above
+    3. **Click** 'Analyze Emotion' to get predictions
+    4. **View** results with confidence scores
+    """)
+    
+    st.markdown("### 💡 Tips for Better Results")
+    st.markdown("""
+    - Use clear, high-quality recordings
+    - Single speaker works best
+    - 2-5 seconds of emotional speech is optimal
+    - Minimize background noise
+    - Ensure the emotion is clearly expressed
+    """)
+    
+    st.markdown("### 🎭 Supported Emotions")
+    emotion_cols = st.columns(4)
+    emotions_display = [
+        ("😊", "Happy"), ("😢", "Sad"), ("😠", "Angry"), ("😨", "Fearful"),
+        ("😲", "Surprised"), ("🤢", "Disgust"), ("😐", "Neutral"), ("😌", "Calm")
+    ]
+    
+    for i, (emoji, emotion) in enumerate(emotions_display):
+        with emotion_cols[i % 4]:
+            st.markdown(f"**{emoji} {emotion}**")
 
-# Instructions
-st.markdown("---")
-st.markdown("""
-### 📋 How to Use:
-1. **Upload a WAV file** (2-5 seconds recommended)
-2. **Click 'Predict Emotion'**
-3. **View the predicted emotion and confidence**
-
-### 🎭 Supported Emotions:
-😊 Happy | 😢 Sad | 😠 Angry | 😨 Fearful | 😲 Surprised | 🤢 Disgust | 😐 Neutral | 😌 Calm
-
-### 📈 Model Info:
-- **Training Accuracy:** 83%+
-- **Features:** 45 audio features (MFCC, Spectral, Chroma, etc.)
-- **Preprocessing:** Feature Selection + Standard Scaling
-- **Architecture:** Deep Neural Network
-""")
+if __name__ == "__main__":
+    main()
