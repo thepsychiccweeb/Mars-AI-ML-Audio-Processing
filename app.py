@@ -4,8 +4,6 @@ import librosa
 import soundfile as sf
 import tensorflow as tf
 
-# Load your trained model
-from my_custom_layers import AttentionPooling  # or define it inline
 
 model = tf.keras.models.load_model(
     'final_emotion_model_1.keras',
