@@ -56,6 +56,6 @@ Happy, Sad, Angry, Fearful, Surprised, Disgust, Neutral, Calm
 
 The system demonstrates robust emotion recognition capabilities suitable for real-world applications in speech emotion analysis.ch emotion analysis.
 
-#Dataset- https://zenodo.org/records/1188976#.XCx-tc9KhQI
-#Streamlit app- https://mars-ai-ml-audio-processing-bfwfa3talck68n6dr8uju8.streamlit.app/
+- Dataset- https://zenodo.org/records/1188976#.XCx-tc9KhQI
+- Streamlit app- https://mars-ai-ml-audio-processing-bfwfa3talck68n6dr8uju8.streamlit.app/
    (or you can also use app.py to deploy it using streamlit)
