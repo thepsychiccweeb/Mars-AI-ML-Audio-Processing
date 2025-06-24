@@ -5,20 +5,19 @@ import soundfile as sf
 import tensorflow as tf
 
 
-model = tf.keras.models.load_model(
-    'final_emotion_model_1.keras',
-    custom_objects={'AttentionPooling': AttentionPooling},
-    compile=False  # safer for inference
-)
-
+import streamlit as st
+import numpy as np
+import librosa
+import soundfile as sf
+import tensorflow as tf
 from tensorflow.keras import layers
 
+# ⬇️ Define custom layer before using it
 class AttentionPooling(layers.Layer):
-    """Attention-based pooling layer for better feature aggregation"""
     def __init__(self, units=64, **kwargs):
         super(AttentionPooling, self).__init__(**kwargs)
         self.units = units
-        
+
     def build(self, input_shape):
         self.W = self.add_weight(
             name='attention_weight',
@@ -39,19 +38,26 @@ class AttentionPooling(layers.Layer):
             trainable=True
         )
         super(AttentionPooling, self).build(input_shape)
-    
+
     def call(self, inputs):
-        x = tf.expand_dims(inputs, axis=1)  # (batch_size, 1, features)
-        uit = tf.tanh(tf.tensordot(x, self.W, axes=1) + self.b)  # (batch_size, 1, units)
-        ait = tf.tensordot(uit, self.u, axes=1)  # (batch_size, 1)
-        ait = tf.nn.softmax(ait, axis=1)  # (batch_size, 1)
-        weighted_input = x * tf.expand_dims(ait, axis=-1)  # (batch_size, 1, features)
-        return tf.reduce_sum(weighted_input, axis=1)  # (batch_size, features)
-    
+        x = tf.expand_dims(inputs, axis=1)
+        uit = tf.tanh(tf.tensordot(x, self.W, axes=1) + self.b)
+        ait = tf.tensordot(uit, self.u, axes=1)
+        ait = tf.nn.softmax(ait, axis=1)
+        weighted_input = x * tf.expand_dims(ait, axis=-1)
+        return tf.reduce_sum(weighted_input, axis=1)
+
     def get_config(self):
         config = super(AttentionPooling, self).get_config()
         config.update({'units': self.units})
         return config
+
+# ✅ Now load model AFTER defining the layer
+model = tf.keras.models.load_model(
+    'final_emotion_model_1.keras',
+    custom_objects={'AttentionPooling': AttentionPooling},
+    compile=False
+)
 
 
 
