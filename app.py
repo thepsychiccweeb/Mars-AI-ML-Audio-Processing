@@ -70,7 +70,7 @@ def predict_emotion(model, le, features):
         features = features.reshape(1, -1)
         prediction = model.predict(features, verbose=0)
         predicted_class = np.argmax(prediction, axis=1)[0]
-        confidence = prediction[0][predicted_class]
+        confidence = float(prediction[0][predicted_class])  # Convert to Python float
         emotion = le.inverse_transform([predicted_class])[0]
         return emotion, confidence
     except Exception as e:
@@ -89,7 +89,6 @@ if model is None:
     st.stop()
 
 st.success("✅ Model loaded successfully!")
-st.info(f"Model expects {model.input_shape[1]} features")
 
 # File upload
 uploaded_file = st.file_uploader("Choose a WAV file", type=['wav'])
@@ -109,8 +108,6 @@ if uploaded_file is not None:
                 features = extract_features(tmp_file_path)
                 
                 if features is not None:
-                    st.info(f"Extracted {len(features)} features")
-                    
                     # Make prediction
                     emotion, confidence = predict_emotion(model, le, features)
                     
@@ -128,7 +125,7 @@ if uploaded_file is not None:
                         emoji = emoji_map.get(emotion, '🎭')
                         st.markdown(f"## {emoji} {emotion.capitalize()}")
                         
-                        # Confidence bar
+                        # Confidence bar (convert to Python float)
                         st.progress(confidence)
                         
                     else:
