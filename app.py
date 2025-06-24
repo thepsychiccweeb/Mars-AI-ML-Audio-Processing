@@ -13,7 +13,6 @@ st.set_page_config(page_title="Emotion Recognition", page_icon="🎭")
 def load_model():
     """Load the saved model and create label encoder"""
     try:
-        # Load model with custom objects if needed
         model = tf.keras.models.load_model('final_emotion_model_1.keras')
         
         # Create label encoder (same as in your notebook)
@@ -26,52 +25,40 @@ def load_model():
         st.error(f"Error loading model: {e}")
         return None, None
 
-def extract_features(audio_file, sr=22050):
-    """Extract features exactly like in your notebook"""
+def extract_features(audio_file):
+    """Extract features - simplified to match model input (45 features)"""
     try:
         # Load audio
-        y, sr = librosa.load(audio_file, sr=sr, duration=3.0)
-        
-        # Pad or trim to 3 seconds
-        if len(y) < sr * 3:
-            y = np.pad(y, (0, sr * 3 - len(y)), mode='constant')
-        else:
-            y = y[:sr * 3]
+        y, sr = librosa.load(audio_file, sr=22050, duration=3.0)
         
         features = []
         
         # MFCC features (26: 13 mean + 13 std)
         mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-        features.extend(np.mean(mfccs, axis=1))
-        features.extend(np.std(mfccs, axis=1))
+        features.extend(np.mean(mfccs, axis=1))  # 13 features
+        features.extend(np.std(mfccs, axis=1))   # 13 features
         
-        # Spectral features (8 total)
+        # Basic spectral features (8 features)
         zcr = librosa.feature.zero_crossing_rate(y)
-        features.extend([np.mean(zcr), np.std(zcr)])
+        features.extend([np.mean(zcr), np.std(zcr)])  # 2 features
         
         rms = librosa.feature.rms(y=y)
-        features.extend([np.mean(rms), np.std(rms)])
+        features.extend([np.mean(rms), np.std(rms)])  # 2 features
         
         spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
-        features.extend([np.mean(spectral_centroid), np.std(spectral_centroid)])
+        features.extend([np.mean(spectral_centroid), np.std(spectral_centroid)])  # 2 features
         
         spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)
-        features.extend([np.mean(spectral_rolloff), np.std(spectral_rolloff)])
+        features.extend([np.mean(spectral_rolloff), np.std(spectral_rolloff)])  # 2 features
         
-        # Chroma features (24: 12 mean + 12 std)
+        # Chroma features (12 mean only to reach 45 total)
         chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-        features.extend(np.mean(chroma, axis=1))
-        features.extend(np.std(chroma, axis=1))
+        features.extend(np.mean(chroma, axis=1))  # 12 features
         
-        # Spectral contrast (7 features)
-        contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
-        features.extend(np.mean(contrast, axis=1))
+        # Total: 26 + 8 + 12 = 46 features, remove 1 to get 45
+        features = np.array(features[:45])
         
-        # Tonnetz features (6 features)
-        tonnetz = librosa.feature.tonnetz(y=librosa.effects.harmonic(y), sr=sr)
-        features.extend(np.mean(tonnetz, axis=1))
-        
-        return np.array(features)
+        return features
     
     except Exception as e:
         st.error(f"Error extracting features: {e}")
@@ -102,6 +89,7 @@ if model is None:
     st.stop()
 
 st.success("✅ Model loaded successfully!")
+st.info(f"Model expects {model.input_shape[1]} features")
 
 # File upload
 uploaded_file = st.file_uploader("Choose a WAV file", type=['wav'])
@@ -121,6 +109,8 @@ if uploaded_file is not None:
                 features = extract_features(tmp_file_path)
                 
                 if features is not None:
+                    st.info(f"Extracted {len(features)} features")
+                    
                     # Make prediction
                     emotion, confidence = predict_emotion(model, le, features)
                     
