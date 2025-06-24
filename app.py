@@ -5,7 +5,8 @@ import soundfile as sf
 import tensorflow as tf
 
 # Load your trained model
-model = tf.keras.models.load_model('final_emotion_model_1.keras')
+model = tf.keras.models.load_model('final_emotion_model_1.keras', compile=False)
+
 
 # Define label map (change as per your dataset)
 emotion_labels = ['neutral', 'calm', 'happy', 'sad', 'angry', 'fearful', 'disgust', 'surprised']
