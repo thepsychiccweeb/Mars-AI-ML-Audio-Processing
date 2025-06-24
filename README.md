@@ -39,7 +39,8 @@ The ResNet architecture allows for deeper networks while maintaining gradient fl
 6. **Deployment**: Streamlit app for interactive emotion prediction
 
 ## Results
-- **Final Test Accuracy**: ~75-80% on RAVDESS dataset
+- **Final Test Accuracy**: 84.6% on RAVDESS dataset
+- **Confusion matrix and other important results are in result_screenshots folder**
 - **Best Model**: ResNet architecture with enhanced feature engineering
 - **Generalization Gap**: <10% indicating good model generalization
 - **Cross-Validation**: Consistent performance across multiple folds
