@@ -27,7 +27,7 @@ This project implements an end-to-end pipeline for recognizing emotions from spe
 6. **Deployment**: Streamlit app for interactive emotion prediction
 
 ## Results
-- **Final Test Accuracy**: ~75-80% on RAVDESS dataset
+- **Final Test Accuracy**: 83.83% on RAVDESS dataset
 - **Best Model**: ResNet architecture with enhanced feature engineering
 - **Generalization Gap**: <10% indicating good model generalization
 - **Cross-Validation**: Consistent performance across multiple folds
