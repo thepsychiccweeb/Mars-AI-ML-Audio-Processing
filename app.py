@@ -5,49 +5,27 @@ import pickle
 import tempfile
 import os
 
-st.title("🔧 DEBUG: Notebook vs App Comparison")
+st.title("🐛 Bug Hunter - Always Happy Problem")
 
-# Load debug data
-@st.cache_resource
-def load_debug_data():
-    with open('debug_data.pkl', 'rb') as f:
-        return pickle.load(f)
+# Load test data
+with open('simple_test.pkl', 'rb') as f:
+    test_data = pickle.load(f)
 
-debug_data = load_debug_data()
+st.write("**Notebook Result:**", test_data['emotion'])
 
-st.success("✅ Debug data loaded!")
-
-# Show notebook results
-st.markdown("## 📓 Notebook Results (Expected)")
-st.write(f"**File:** {debug_data['test_file_path']}")
-st.write(f"**True Emotion:** {debug_data['true_emotion']}")
-st.write(f"**Predicted:** {debug_data['predicted_emotion']}")
-st.write(f"**Confidence:** {debug_data['confidence']:.4f}")
-
-st.markdown("### Raw Features (Notebook)")
-st.write(f"Shape: {debug_data['raw_features'].shape}")
-st.write(f"First 10: {debug_data['raw_features'][:10]}")
-
-st.markdown("### Scaled Features (Notebook)")
-st.write(f"Shape: {debug_data['scaled_features'].shape}")
-st.write(f"First 10: {debug_data['scaled_features'][:10]}")
-
-st.markdown("---")
-
-# Test with uploaded file
-uploaded_file = st.file_uploader("Upload the SAME WAV file", type=['wav'])
+uploaded_file = st.file_uploader("Upload WAV", type=['wav'])
 
 if uploaded_file:
+    # Save file
     with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
         tmp.write(uploaded_file.getvalue())
         tmp_path = tmp.name
     
-    try:
-        st.markdown("## 📱 App Results (Actual)")
-        
-        # Extract features in app
-        def extract_simple_features(file_path, duration=3.0, sr=22050):
+    # EXACT same function as notebook
+    def extract_simple_features(file_path, duration=3.0, sr=22050):
+        try:
             y, sr = librosa.load(file_path, sr=sr, duration=duration)
+            
             if len(y) < duration * sr:
                 y = np.pad(y, (0, int(duration * sr) - len(y)), 'constant')
             
@@ -85,62 +63,59 @@ if uploaded_file:
             ])
             
             return features
-        
+            
+        except Exception as e:
+            st.error(f"Feature extraction error: {e}")
+            return None
+    
+    if st.button("Test"):
         # Extract features
         app_features = extract_simple_features(tmp_path)
         
-        st.markdown("### Raw Features (App)")
-        st.write(f"Shape: {app_features.shape}")
-        st.write(f"First 10: {app_features[:10]}")
-        
-        # Compare raw features
-        feature_diff = np.abs(debug_data['raw_features'] - app_features)
-        st.write(f"**Max difference in raw features:** {np.max(feature_diff):.6f}")
-        
-        if np.max(feature_diff) > 0.001:
-            st.error("❌ RAW FEATURES DON'T MATCH!")
-            st.write("Notebook features:", debug_data['raw_features'][:5])
-            st.write("App features:", app_features[:5])
+        if app_features is None:
+            st.error("Feature extraction failed!")
         else:
-            st.success("✅ Raw features match!")
-        
-        # Apply preprocessing
-        app_features_reshaped = app_features.reshape(1, -1)
-        app_features_selected = debug_data['selector'].transform(app_features_reshaped)
-        app_features_scaled = debug_data['scaler'].transform(app_features_selected)
-        
-        st.markdown("### Scaled Features (App)")
-        st.write(f"Shape: {app_features_scaled.shape}")
-        st.write(f"First 10: {app_features_scaled[0][:10]}")
-        
-        # Compare scaled features
-        scaled_diff = np.abs(debug_data['scaled_features'] - app_features_scaled[0])
-        st.write(f"**Max difference in scaled features:** {np.max(scaled_diff):.6f}")
-        
-        if np.max(scaled_diff) > 0.001:
-            st.error("❌ SCALED FEATURES DON'T MATCH!")
-        else:
-            st.success("✅ Scaled features match!")
-        
-        # Make prediction
-        app_prediction = debug_data['model'].predict(app_features_scaled, verbose=0)
-        app_predicted_class = np.argmax(app_prediction[0])
-        app_predicted_emotion = debug_data['label_encoder'].classes_[app_predicted_class]
-        app_confidence = app_prediction[0][app_predicted_class]
-        
-        st.write(f"**App Predicted:** {app_predicted_emotion}")
-        st.write(f"**App Confidence:** {app_confidence:.4f}")
-        
-        # Compare predictions
-        pred_diff = np.abs(debug_data['prediction'] - app_prediction[0])
-        st.write(f"**Max difference in predictions:** {np.max(pred_diff):.6f}")
-        
-        if debug_data['predicted_emotion'] == app_predicted_emotion:
-            st.success("✅ PREDICTIONS MATCH!")
-        else:
-            st.error("❌ PREDICTIONS DON'T MATCH!")
-            st.write("Notebook prediction:", debug_data['prediction'])
-            st.write("App prediction:", app_prediction[0])
+            st.write("**App Features (first 5):**", app_features[:5])
+            st.write("**Notebook Features (first 5):**", test_data['raw_features'][:5])
+            
+            # Check if features match
+            diff = np.abs(app_features - test_data['raw_features'])
+            max_diff = np.max(diff)
+            st.write(f"**Max difference:** {max_diff}")
+            
+            if max_diff > 0.01:
+                st.error("❌ FEATURES DON'T MATCH!")
+                st.write("This is why predictions are wrong!")
+                
+                # Show where they differ most
+                worst_idx = np.argmax(diff)
+                st.write(f"Worst difference at index {worst_idx}:")
+                st.write(f"Notebook: {test_data['raw_features'][worst_idx]}")
+                st.write(f"App: {app_features[worst_idx]}")
+                
+            else:
+                st.success("✅ Features match!")
+                
+                # Test preprocessing
+                app_reshaped = app_features.reshape(1, -1)
+                app_selected = test_data['selector'].transform(app_reshaped)
+                app_scaled = test_data['scaler'].transform(app_selected)
+                
+                st.write("**App Scaled (first 5):**", app_scaled[0][:5])
+                st.write("**Notebook Scaled (first 5):**", test_data['scaled_features'][:5])
+                
+                # Test prediction
+                app_pred = test_data['model'].predict(app_scaled, verbose=0)
+                app_emotion = test_data['label_encoder'].classes_[np.argmax(app_pred[0])]
+                
+                st.write("**App Prediction:**", app_emotion)
+                
+                if app_emotion == test_data['emotion']:
+                    st.success("✅ PREDICTIONS MATCH!")
+                else:
+                    st.error("❌ Still wrong prediction!")
+                    st.write("App probs:", app_pred[0])
+                    st.write("Notebook probs:", test_data['prediction'])
     
-    finally:
-        os.unlink(tmp_path)
+    # Cleanup
+    os.unlink(tmp_path)
