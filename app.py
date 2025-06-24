@@ -5,6 +5,7 @@ import numpy as np
 import tempfile
 import os
 import pickle
+import io
 
 # Page configuration
 st.set_page_config(
@@ -28,24 +29,28 @@ def load_model_pipeline():
         )
     except FileNotFoundError:
         st.error("❌ exact_pipeline.pkl not found!")
-        st.info("Please run the extraction code in your notebook first.")
         return None, None, None, None
     except Exception as e:
         st.error(f"❌ Error loading pipeline: {e}")
         return None, None, None, None
 
 def extract_simple_features(file_path, duration=3.0, sr=22050):
-    """Extract features - EXACT copy from notebook"""
+    """Extract features - EXACT copy from notebook with better error handling"""
     try:
-        # Load audio
-        y, sr = librosa.load(file_path, sr=sr, duration=duration)
+        # Load audio with error handling
+        y, current_sr = librosa.load(file_path, sr=sr, duration=duration)
+        
+        # Check if audio was loaded successfully
+        if len(y) == 0:
+            st.error("Audio file appears to be empty or corrupted")
+            return np.zeros(45)
         
         # Pad if shorter
-        if len(y) < duration * sr:
-            y = np.pad(y, (0, int(duration * sr) - len(y)), 'constant')
+        if len(y) < duration * current_sr:
+            y = np.pad(y, (0, int(duration * current_sr) - len(y)), 'constant')
         
         # 1. MFCC features (20 total: 10 mean + 10 std)
-        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=10)
+        mfcc = librosa.feature.mfcc(y=y, sr=current_sr, n_mfcc=10)
         mfcc_mean = np.mean(mfcc, axis=1)
         mfcc_std = np.std(mfcc, axis=1)
         
@@ -60,21 +65,21 @@ def extract_simple_features(file_path, duration=3.0, sr=22050):
         rmse_std = np.std(rmse)
         
         # 4. Spectral Centroid (2 features)
-        spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
+        spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=current_sr)
         sc_mean = np.mean(spectral_centroid)
         sc_std = np.std(spectral_centroid)
         
         # 5. Spectral Rolloff (2 features)
-        spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)
+        spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=current_sr)
         sr_mean = np.mean(spectral_rolloff)
         sr_std = np.std(spectral_rolloff)
         
         # 6. Chroma features (12 features - mean only)
-        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+        chroma = librosa.feature.chroma_stft(y=y, sr=current_sr)
         chroma_mean = np.mean(chroma, axis=1)
         
         # 7. Spectral Contrast (5 features)
-        spectral_contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
+        spectral_contrast = librosa.feature.spectral_contrast(y=y, sr=current_sr)
         contrast_mean = np.mean(spectral_contrast, axis=1)[:5]
         
         # Combine all features (total: 45)
@@ -87,25 +92,45 @@ def extract_simple_features(file_path, duration=3.0, sr=22050):
             contrast_mean   # 5
         ])
         
+        # Handle any NaN or infinite values
+        features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+        
         return features
         
     except Exception as e:
         st.error(f"Feature extraction failed: {e}")
         return np.zeros(45)
 
+def save_uploaded_file(uploaded_file):
+    """Safely save uploaded file"""
+    try:
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+            # Write the uploaded file content
+            tmp_file.write(uploaded_file.getvalue())
+            return tmp_file.name
+    except Exception as e:
+        st.error(f"Error saving file: {e}")
+        return None
+
 def predict_emotion(audio_path, model, selector, scaler, label_encoder):
     """Exact prediction pipeline from notebook"""
     try:
-        # Step 1: Extract features (same as prepare_data)
+        # Step 1: Extract features
         features = extract_simple_features(audio_path)
+        
+        # Check if features are valid
+        if np.all(features == 0):
+            st.error("Failed to extract valid features from audio")
+            return None, None, None
         
         # Step 2: Reshape for sklearn
         features_reshaped = features.reshape(1, -1)
         
-        # Step 3: Apply feature selection (same as prepare_data)
+        # Step 3: Apply feature selection
         features_selected = selector.transform(features_reshaped)
         
-        # Step 4: Apply scaling (same as prepare_data)
+        # Step 4: Apply scaling
         features_scaled = scaler.transform(features_selected)
         
         # Step 5: Model prediction
@@ -149,36 +174,65 @@ def main():
     
     st.markdown("---")
     
-    # File upload
+    # File upload with better handling
     uploaded_file = st.file_uploader(
         "Choose a WAV audio file",
         type=['wav'],
-        help="Upload a clear audio file (2-5 seconds recommended)"
+        help="Upload a clear audio file (2-5 seconds recommended)",
+        accept_multiple_files=False
     )
     
     if uploaded_file is not None:
-        st.success(f"✅ File uploaded: {uploaded_file.name}")
+        # Validate file
+        if uploaded_file.size == 0:
+            st.error("❌ Uploaded file is empty")
+            return
+        
+        if uploaded_file.size > 10 * 1024 * 1024:  # 10MB limit
+            st.error("❌ File too large. Please upload a file smaller than 10MB")
+            return
+        
+        st.success(f"✅ File uploaded: {uploaded_file.name} ({uploaded_file.size} bytes)")
         
         # Show audio player
-        st.audio(uploaded_file, format='audio/wav')
+        try:
+            st.audio(uploaded_file, format='audio/wav')
+        except Exception as e:
+            st.warning(f"Could not display audio player: {e}")
         
-        # Prediction button
+        # Prediction section
+        st.markdown("---")
+        
         if st.button("🎯 Analyze Emotion", type="primary"):
-            with st.spinner("Analyzing audio..."):
-                # Save uploaded file temporarily
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-                    tmp_file.write(uploaded_file.getvalue())
-                    temp_path = tmp_file.name
+            with st.spinner("Processing audio file..."):
+                # Save file safely
+                temp_path = save_uploaded_file(uploaded_file)
+                
+                if temp_path is None:
+                    st.error("❌ Failed to process uploaded file")
+                    return
                 
                 try:
-                    # Make prediction using exact pipeline
+                    # Verify file exists and is readable
+                    if not os.path.exists(temp_path):
+                        st.error("❌ Temporary file was not created properly")
+                        return
+                    
+                    # Check file size
+                    file_size = os.path.getsize(temp_path)
+                    if file_size == 0:
+                        st.error("❌ Saved file is empty")
+                        return
+                    
+                    st.info(f"Processing file: {file_size} bytes")
+                    
+                    # Make prediction
                     emotion, confidence, all_emotions = predict_emotion(
                         temp_path, model, selector, scaler, label_encoder
                     )
                     
                     if emotion is not None:
                         # Display results
-                        st.markdown("---")
                         st.markdown("## 🎯 Results")
                         
                         # Emotion emojis
@@ -197,9 +251,8 @@ def main():
                         with col2:
                             st.metric("Confidence", f"{confidence*100:.1f}%")
                         
-                        # Confidence indicator
-                        confidence_color = "green" if confidence > 0.7 else "orange" if confidence > 0.5 else "red"
-                        st.markdown(f"<div style='background-color: {confidence_color}; height: 10px; width: {confidence*100}%; border-radius: 5px;'></div>", unsafe_allow_html=True)
+                        # Progress bar for confidence
+                        st.progress(min(confidence, 1.0))
                         
                         # All emotion probabilities
                         st.markdown("### 📊 All Emotion Probabilities")
@@ -210,7 +263,7 @@ def main():
                         for i, (emo, prob) in enumerate(sorted_emotions):
                             emo_emoji = emotion_emojis.get(emo, '🎭')
                             
-                            col1, col2 = st.columns([3, 1])
+                            col1, col2, col3 = st.columns([2, 1, 1])
                             with col1:
                                 if i == 0:  # Top prediction
                                     st.markdown(f"**{emo_emoji} {emo.capitalize()}** 🏆")
@@ -218,58 +271,52 @@ def main():
                                     st.write(f"{emo_emoji} {emo.capitalize()}")
                             with col2:
                                 st.write(f"{prob*100:.2f}%")
+                            with col3:
+                                st.progress(prob)
                         
                         # Confidence interpretation
                         st.markdown("---")
                         if confidence >= 0.8:
-                            st.success("🎯 **Very High Confidence** - The model is very sure about this prediction!")
+                            st.success("🎯 **Very High Confidence**")
                         elif confidence >= 0.6:
-                            st.success("✅ **High Confidence** - The model is confident about this prediction.")
+                            st.success("✅ **High Confidence**")
                         elif confidence >= 0.4:
-                            st.warning("⚠️ **Moderate Confidence** - The prediction might be uncertain.")
+                            st.warning("⚠️ **Moderate Confidence**")
                         else:
-                            st.error("❓ **Low Confidence** - The model is not sure. Try a clearer audio file.")
+                            st.error("❓ **Low Confidence** - Try a clearer audio file")
                     
                     else:
                         st.error("❌ Failed to analyze the audio file")
                 
                 except Exception as e:
                     st.error(f"❌ Error processing audio: {str(e)}")
+                    st.info("Please try uploading a different WAV file")
                 
                 finally:
                     # Clean up temporary file
-                    if os.path.exists(temp_path):
-                        os.unlink(temp_path)
+                    if temp_path and os.path.exists(temp_path):
+                        try:
+                            os.unlink(temp_path)
+                        except:
+                            pass  # Ignore cleanup errors
     
     # Instructions
     st.markdown("---")
     st.markdown("### 📋 How to Use")
     st.markdown("""
-    1. **Upload** a WAV audio file using the file uploader above
-    2. **Listen** to your audio using the built-in player
-    3. **Click** "Analyze Emotion" to get the prediction
-    4. **View** the results with confidence scores
+    1. **Upload** a WAV audio file (max 10MB)
+    2. **Listen** to verify the audio plays correctly
+    3. **Click** "Analyze Emotion" to get predictions
+    4. **View** results with confidence scores
     """)
     
-    st.markdown("### 💡 Tips for Best Results")
+    st.markdown("### 💡 Troubleshooting")
     st.markdown("""
-    - Use clear, high-quality audio recordings
-    - Keep recordings between 2-5 seconds
-    - Ensure the speaker clearly expresses the emotion
-    - Minimize background noise
-    - Single speaker works better than multiple speakers
+    - **File upload fails**: Try a smaller WAV file (under 5MB)
+    - **No audio playback**: File might be corrupted, try re-exporting
+    - **Low confidence**: Use clearer speech with obvious emotion
+    - **Wrong predictions**: Ensure single speaker, minimal background noise
     """)
-    
-    st.markdown("### 🎭 Supported Emotions")
-    emotions_display = [
-        ("😊", "Happy"), ("😢", "Sad"), ("😠", "Angry"), ("😨", "Fearful"),
-        ("😲", "Surprised"), ("🤢", "Disgust"), ("😐", "Neutral"), ("😌", "Calm")
-    ]
-    
-    cols = st.columns(4)
-    for i, (emoji, emotion) in enumerate(emotions_display):
-        with cols[i % 4]:
-            st.markdown(f"**{emoji}** {emotion}")
 
 if __name__ == "__main__":
     main()
