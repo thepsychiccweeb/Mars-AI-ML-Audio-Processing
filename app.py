@@ -2,138 +2,37 @@ import streamlit as st
 import tensorflow as tf
 import librosa
 import numpy as np
-import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 import tempfile
 import os
-import plotly.express as px
-import plotly.graph_objects as go
-import pickle
-import json
 
-# Configure Streamlit page
-st.set_page_config(
-    page_title="Emotion Recognition AI",
-    page_icon="🎭",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS for better styling
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 3rem;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .prediction-box {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 10px;
-        border-left: 5px solid #1f77b4;
-        margin: 1rem 0;
-    }
-    .confidence-high {
-        color: #28a745;
-        font-weight: bold;
-    }
-    .confidence-medium {
-        color: #ffc107;
-        font-weight: bold;
-    }
-    .confidence-low {
-        color: #dc3545;
-        font-weight: bold;
-    }
-    .error-box {
-        background-color: #ffe6e6;
-        padding: 1rem;
-        border-radius: 10px;
-        border-left: 5px solid #dc3545;
-        margin: 1rem 0;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Configure page
+st.set_page_config(page_title="Emotion Recognition", page_icon="🎭")
 
 @st.cache_resource
-def load_model_and_encoder():
-    """Load the trained model and label encoder with multiple fallback methods"""
-    model = None
-    le = None
-    model_info = None
-    
-    # Method 1: Try SavedModel format
+def load_model():
+    """Load the saved model and create label encoder"""
     try:
-        st.info("🔄 Attempting to load SavedModel format...")
-        model = tf.keras.models.load_model('emotion_model_savedmodel')
-        st.success("✅ SavedModel loaded successfully!")
-    except Exception as e:
-        st.warning(f"SavedModel loading failed: {str(e)[:100]}...")
+        # Load model with custom objects if needed
+        model = tf.keras.models.load_model('final_emotion_model_1.keras')
         
-        # Method 2: Try loading from architecture + weights
-        try:
-            st.info("🔄 Attempting to load from architecture + weights...")
-            with open('model_architecture.json', 'r') as json_file:
-                model_json = json_file.read()
-            model = tf.keras.models.model_from_json(model_json)
-            model.load_weights('model_weights.h5')
-            st.success("✅ Model loaded from architecture + weights!")
-        except Exception as e2:
-            st.warning(f"Architecture + weights loading failed: {str(e2)[:100]}...")
-            
-            # Method 3: Try original .keras file with compatibility mode
-            try:
-                st.info("🔄 Attempting to load original .keras file...")
-                # Set compatibility mode
-                tf.config.experimental.enable_op_determinism()
-                model = tf.keras.models.load_model('final_emotion_model_1.keras', compile=False)
-                # Recompile the model
-                model.compile(
-                    optimizer='adam',
-                    loss='sparse_categorical_crossentropy',
-                    metrics=['accuracy']
-                )
-                st.success("✅ Original .keras model loaded with compatibility mode!")
-            except Exception as e3:
-                st.error(f"All model loading methods failed. Last error: {str(e3)[:200]}...")
-                return None, None, None
-    
-    # Load label encoder
-    try:
-        with open('label_encoder.pkl', 'rb') as f:
-            le = pickle.load(f)
-        st.success("✅ Label encoder loaded!")
-    except:
-        st.warning("Label encoder file not found, creating new one...")
+        # Create label encoder (same as in your notebook)
         le = LabelEncoder()
         all_emotions = ['neutral', 'calm', 'happy', 'sad', 'angry', 'fearful', 'disgust', 'surprised']
         le.fit(all_emotions)
-    
-    # Load model info
-    try:
-        with open('model_info.pkl', 'rb') as f:
-            model_info = pickle.load(f)
-    except:
-        if model:
-            model_info = {
-                'input_shape': model.input_shape,
-                'output_shape': model.output_shape,
-                'num_classes': len(le.classes_),
-                'emotions': list(le.classes_),
-                'total_params': model.count_params()
-            }
-    
-    return model, le, model_info
+        
+        return model, le
+    except Exception as e:
+        st.error(f"Error loading model: {e}")
+        return None, None
 
 def extract_features(audio_file, sr=22050):
-    """Extract audio features (same as training pipeline)"""
+    """Extract features exactly like in your notebook"""
     try:
-        # Load audio file
+        # Load audio
         y, sr = librosa.load(audio_file, sr=sr, duration=3.0)
         
-        # Pad or trim to ensure consistent length
+        # Pad or trim to 3 seconds
         if len(y) < sr * 3:
             y = np.pad(y, (0, sr * 3 - len(y)), mode='constant')
         else:
@@ -141,12 +40,12 @@ def extract_features(audio_file, sr=22050):
         
         features = []
         
-        # MFCC features (26 features: 13 mean + 13 std)
+        # MFCC features (26: 13 mean + 13 std)
         mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
         features.extend(np.mean(mfccs, axis=1))
         features.extend(np.std(mfccs, axis=1))
         
-        # Spectral features
+        # Spectral features (8 total)
         zcr = librosa.feature.zero_crossing_rate(y)
         features.extend([np.mean(zcr), np.std(zcr)])
         
@@ -159,7 +58,7 @@ def extract_features(audio_file, sr=22050):
         spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)
         features.extend([np.mean(spectral_rolloff), np.std(spectral_rolloff)])
         
-        # Chroma features (24 features: 12 mean + 12 std)
+        # Chroma features (24: 12 mean + 12 std)
         chroma = librosa.feature.chroma_stft(y=y, sr=sr)
         features.extend(np.mean(chroma, axis=1))
         features.extend(np.std(chroma, axis=1))
@@ -179,452 +78,90 @@ def extract_features(audio_file, sr=22050):
         return None
 
 def predict_emotion(model, le, features):
-    """Predict emotion from features"""
+    """Make prediction"""
     try:
-        # Reshape features for model input
         features = features.reshape(1, -1)
-        
-        # Make prediction
         prediction = model.predict(features, verbose=0)
         predicted_class = np.argmax(prediction, axis=1)[0]
         confidence = prediction[0][predicted_class]
-        
-        # Get emotion label
         emotion = le.inverse_transform([predicted_class])[0]
-        
-        # Get all probabilities for visualization
-        all_probabilities = prediction[0]
-        emotion_probs = {le.inverse_transform([i])[0]: prob for i, prob in enumerate(all_probabilities)}
-        
-        return emotion, confidence, emotion_probs
-    
+        return emotion, confidence
     except Exception as e:
         st.error(f"Error making prediction: {e}")
-        return None, None, None
+        return None, None
 
-def create_probability_chart(emotion_probs):
-    """Create a bar chart of emotion probabilities"""
-    emotions = list(emotion_probs.keys())
-    probabilities = [prob * 100 for prob in emotion_probs.values()]
-    
-    # Create color map
-    colors = ['#ff6b6b' if prob == max(probabilities) else '#4ecdc4' for prob in probabilities]
-    
-    fig = go.Figure(data=[
-        go.Bar(
-            x=emotions,
-            y=probabilities,
-            marker_color=colors,
-            text=[f'{prob:.1f}%' for prob in probabilities],
-            textposition='auto',
-        )
-    ])
-    
-    fig.update_layout(
-        title="Emotion Prediction Probabilities",
-        xaxis_title="Emotions",
-        yaxis_title="Probability (%)",
-        showlegend=False,
-        height=400,
-        font=dict(size=12)
-    )
-    
-    return fig
+# Main app
+st.title("🎭 Emotion Recognition from Audio")
+st.write("Upload a WAV file to detect the emotion")
 
-def get_emotion_emoji(emotion):
-    """Get emoji for emotion"""
-    emoji_map = {
-        'happy': '😊',
-        'sad': '😢',
-        'angry': '😠',
-        'fearful': '😨',
-        'surprised': '😲',
-        'disgust': '🤢',
-        'neutral': '😐',
-        'calm': '😌'
-    }
-    return emoji_map.get(emotion.lower(), '🎭')
+# Load model
+model, le = load_model()
 
-def get_confidence_class(confidence):
-    """Get CSS class based on confidence level"""
-    if confidence >= 0.7:
-        return "confidence-high"
-    elif confidence >= 0.5:
-        return "confidence-medium"
-    else:
-        return "confidence-low"
+if model is None:
+    st.error("❌ Could not load model. Make sure 'final_emotion_model_1.keras' is in the same directory.")
+    st.stop()
 
-def main():
-    # Header
-    st.markdown('<h1 class="main-header">🎭 Emotion Recognition AI</h1>', unsafe_allow_html=True)
-    st.markdown("---")
+st.success("✅ Model loaded successfully!")
+
+# File upload
+uploaded_file = st.file_uploader("Choose a WAV file", type=['wav'])
+
+if uploaded_file is not None:
+    st.audio(uploaded_file)
     
-    # Load model and encoder
-    with st.spinner("Loading AI model..."):
-        model, le, model_info = load_model_and_encoder()
-    
-    if model is None or le is None:
-        st.markdown("""
-        <div class="error-box">
-            <h3>❌ Model Loading Failed</h3>
-            <p>Please ensure you have the model files in the correct location:</p>
-            <ul>
-                <li><code>emotion_model_savedmodel/</code> (preferred)</li>
-                <li><code>model_architecture.json</code> + <code>model_weights.h5</code></li>
-                <li><code>final_emotion_model_1.keras</code> (fallback)</li>
-            </ul>
-            <p><strong>Solution:</strong> Run the model converter script first:</p>
-            <code>python convert_model.py</code>
-        </div>
-        """, unsafe_allow_html=True)
-        st.stop()
-    
-    st.success("✅ AI model loaded successfully!")
-    
-    # Sidebar with information
-    with st.sidebar:
-        st.header("📋 About")
-        st.write("""
-        This AI system can recognize emotions from audio files.
-        
-        **Supported Emotions:**
-        - 😊 Happy
-        - 😢 Sad  
-        - 😠 Angry
-        - 😨 Fearful
-        - 😲 Surprised
-        - 🤢 Disgust
-        - 😐 Neutral
-        - 😌 Calm
-        """)
-        
-        st.header("📁 File Requirements")
-        st.write("""
-        - **Format:** WAV files (MP3 also supported)
-        - **Duration:** Any (will be processed to 3 seconds)
-        - **Quality:** Clear audio works best
-        - **Language:** Works with any language/speech
-        """)
-        
-        st.header("🔧 Model Info")
-        if model_info:
-            st.write(f"**Parameters:** {model_info.get('total_params', 'Unknown'):,}")
-            st.write(f"**Input Features:** {model_info.get('input_shape', [None, 'Unknown'])[1]}")
-            st.write(f"**Classes:** {model_info.get('num_classes', len(le.classes_))}")
-            st.write(f"**Model Type:** Neural Network")
-    
-        # Main content area
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.header("🎤 Upload Audio File")
-        uploaded_file = st.file_uploader(
-            "Choose an audio file",
-            type=['wav', 'mp3'],
-            help="Upload a WAV or MP3 audio file to analyze emotions"
-        )
-        
-        if uploaded_file is not None:
-            # Display file info
-            st.success(f"✅ File uploaded: {uploaded_file.name}")
+    if st.button("🔍 Predict Emotion"):
+        with st.spinner("Analyzing..."):
+            # Save uploaded file temporarily
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                tmp_file_path = tmp_file.name
             
-            # Play audio
-            st.audio(uploaded_file, format=f'audio/{uploaded_file.type.split("/")[1]}')
-            
-            # Process button
-            if st.button("🔍 Analyze Emotion", type="primary"):
-                with st.spinner("Analyzing audio... This may take a few seconds."):
-                    # Save uploaded file temporarily
-                    file_extension = uploaded_file.name.split('.')[-1]
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_extension}') as tmp_file:
-                        tmp_file.write(uploaded_file.getvalue())
-                        tmp_file_path = tmp_file.name
+            try:
+                # Extract features
+                features = extract_features(tmp_file_path)
+                
+                if features is not None:
+                    # Make prediction
+                    emotion, confidence = predict_emotion(model, le, features)
                     
-                    try:
-                        # Extract features
-                        features = extract_features(tmp_file_path)
+                    if emotion is not None:
+                        # Display result
+                        st.success(f"🎯 **Predicted Emotion: {emotion.upper()}**")
+                        st.info(f"Confidence: {confidence*100:.1f}%")
                         
-                        if features is not None:
-                            # Validate feature dimensions
-                            expected_features = 71  # Based on your model
-                            if len(features) != expected_features:
-                                st.warning(f"Feature dimension mismatch. Expected {expected_features}, got {len(features)}")
-                                # Pad or truncate features if needed
-                                if len(features) < expected_features:
-                                    features = np.pad(features, (0, expected_features - len(features)), mode='constant')
-                                else:
-                                    features = features[:expected_features]
-                            
-                            # Make prediction
-                            emotion, confidence, emotion_probs = predict_emotion(model, le, features)
-                            
-                            if emotion is not None:
-                                # Store results in session state
-                                st.session_state.prediction_results = {
-                                    'emotion': emotion,
-                                    'confidence': confidence,
-                                    'emotion_probs': emotion_probs,
-                                    'features_extracted': len(features)
-                                }
-                                st.success("🎯 Analysis completed!")
-                            else:
-                                st.error("❌ Failed to make prediction")
-                        else:
-                            st.error("❌ Failed to extract features from audio")
+                        # Emoji mapping
+                        emoji_map = {
+                            'happy': '😊', 'sad': '😢', 'angry': '😠', 'fearful': '😨',
+                            'surprised': '😲', 'disgust': '🤢', 'neutral': '😐', 'calm': '😌'
+                        }
                         
-                    except Exception as e:
-                        st.error(f"❌ Error processing audio: {e}")
-                        st.error("Please try with a different audio file or check the file format.")
-                    
-                    finally:
-                        # Clean up temporary file
-                        if os.path.exists(tmp_file_path):
-                            os.unlink(tmp_file_path)
-        
-        # Audio recording section
-        st.markdown("---")
-        st.subheader("🎙️ Or Record Audio")
-        st.info("💡 **Tip:** You can also record audio directly using your device's voice recorder app, then upload the file here.")
-        
-        with st.expander("📱 How to Record Audio"):
-            st.write("""
-            **On Windows:**
-            1. Open Voice Recorder app
-            2. Click record and speak with emotion
-            3. Save as WAV file
-            4. Upload here
-            
-            **On Mac:**
-            1. Open QuickTime Player
-            2. File → New Audio Recording
-            3. Record and save
-            4. Upload here
-            
-            **On Phone:**
-            1. Use voice recorder app
-            2. Record 2-5 seconds of emotional speech
-            3. Share/export as audio file
-            4. Upload here
-            """)
-    
-    with col2:
-        st.header("📊 Prediction Results")
-        
-        # Display results if available
-        if hasattr(st.session_state, 'prediction_results'):
-            results = st.session_state.prediction_results
-            emotion = results['emotion']
-            confidence = results['confidence']
-            emotion_probs = results['emotion_probs']
-            
-            # Main prediction display
-            emoji = get_emotion_emoji(emotion)
-            confidence_class = get_confidence_class(confidence)
-            
-            st.markdown(f"""
-            <div class="prediction-box">
-                <h2 style="text-align: center; margin: 0;">
-                    {emoji} <span style="text-transform: capitalize;">{emotion}</span>
-                </h2>
-                <p style="text-align: center; margin: 10px 0 0 0;">
-                    Confidence: <span class="{confidence_class}">{confidence*100:.1f}%</span>
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Confidence interpretation
-            if confidence >= 0.7:
-                st.success("🎯 High confidence prediction!")
-                st.info("The model is very confident about this emotion.")
-            elif confidence >= 0.5:
-                st.warning("⚠️ Moderate confidence prediction.")
-                st.info("The model has moderate confidence. Consider using clearer audio.")
-            else:
-                st.error("❓ Low confidence prediction.")
-                st.info("The model has low confidence. Try recording clearer audio with more emotional expression.")
-            
-            # Probability chart
-            st.plotly_chart(create_probability_chart(emotion_probs), use_container_width=True)
-            
-            # Detailed probabilities
-            with st.expander("📈 Detailed Probabilities"):
-                sorted_probs = sorted(emotion_probs.items(), key=lambda x: x[1], reverse=True)
-                for i, (emo, prob) in enumerate(sorted_probs):
-                    emoji = get_emotion_emoji(emo)
-                    if i == 0:  # Highest probability
-                        st.markdown(f"**{emoji} {emo.capitalize()}: {prob*100:.2f}%** 🏆")
+                        emoji = emoji_map.get(emotion, '🎭')
+                        st.markdown(f"## {emoji} {emotion.capitalize()}")
+                        
+                        # Confidence bar
+                        st.progress(confidence)
+                        
                     else:
-                        st.write(f"{emoji} {emo.capitalize()}: {prob*100:.2f}%")
+                        st.error("❌ Failed to make prediction")
+                else:
+                    st.error("❌ Failed to extract features")
+                    
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
             
-            # Technical details
-            with st.expander("🔧 Technical Details"):
-                st.write(f"**Features Extracted:** {results.get('features_extracted', 'Unknown')}")
-                st.write(f"**Model Input Shape:** {model.input_shape}")
-                st.write(f"**Processing Time:** < 1 second")
-                st.write(f"**Audio Duration:** 3 seconds (processed)")
-        
-        else:
-            st.info("👆 Upload an audio file and click 'Analyze Emotion' to see results here.")
-            
-            # Sample results preview
-            st.subheader("📋 What You'll See:")
-            st.write("""
-            After uploading and analyzing an audio file, you'll see:
-            
-            1. **🎭 Predicted Emotion** with confidence score
-            2. **📊 Probability Chart** showing all emotion scores
-            3. **📈 Detailed Breakdown** of each emotion probability
-            4. **🔧 Technical Details** about the analysis
-            """)
-    
-    # Additional features
-    st.markdown("---")
-    
-    # Performance metrics
-    col3, col4, col5 = st.columns(3)
-    
-    with col3:
-        st.metric(
-            label="🎯 Model Accuracy",
-            value="75.2%",
-            help="Average accuracy on test dataset"
-        )
-    
-    with col4:
-        st.metric(
-            label="⚡ Processing Speed",
-            value="< 1s",
-            help="Time to analyze audio file"
-        )
-    
-    with col5:
-        st.metric(
-            label="🎵 Supported Formats",
-            value="WAV, MP3",
-            help="Audio file formats supported"
-        )
-    
-    # Tips section
-    with st.expander("💡 Tips for Better Results"):
-        col_tip1, col_tip2 = st.columns(2)
-        
-        with col_tip1:
-            st.write("""
-            **🎤 Audio Quality:**
-            - Use clear, high-quality recordings
-            - Minimize background noise
-            - Speak clearly and naturally
-            - 2-5 seconds of speech works best
-            """)
-        
-        with col_tip2:
-            st.write("""
-            **😊 Emotional Expression:**
-            - Express emotions naturally
-            - Avoid over-acting
-            - Single speaker works best
-            - Clear emotional intent helps
-            """)
-        
-        st.write("""
-        **🔧 Troubleshooting:**
-        - If accuracy is low, try re-recording with clearer emotion
-        - Very short clips (< 1 second) may not work well
-        - Multiple speakers can confuse the model
-        - Background music affects accuracy
-        """)
-    
-    # Sample audio section
-    with st.expander("🎵 Sample Phrases to Try"):
-        st.write("""
-        **Try recording yourself saying these phrases with the corresponding emotion:**
-        
-        - 😊 **Happy:** "I'm so excited about this!" "This is wonderful news!"
-        - 😢 **Sad:** "I'm feeling really down today." "This makes me so sad."
-        - 😠 **Angry:** "This is really frustrating!" "I can't believe this happened!"
-        - 😨 **Fearful:** "I'm really scared about this." "This is terrifying!"
-        - 😲 **Surprised:** "Wow, I can't believe it!" "That's amazing!"
-        - 🤢 **Disgust:** "That's absolutely disgusting." "I can't stand this."
-        - 😐 **Neutral:** "The weather is okay today." "I need to go to the store."
-        - 😌 **Calm:** "Everything is peaceful and quiet." "I feel very relaxed."
-        """)
-    
-    # Model information
-    with st.expander("🤖 About the AI Model"):
-        st.write("""
-        **Model Architecture:**
-        - Deep Neural Network with ResNet-style connections
-        - Trained on emotional speech datasets
-        - Uses advanced audio feature extraction (MFCC, Spectral, Chroma, etc.)
-        
-        **Training Data:**
-        - Multiple emotional speech datasets
-        - 8 emotion categories
-        - Thousands of audio samples
-        - Cross-validation tested
-        
-        **Performance:**
-        - 75%+ accuracy on test data
-        - Real-time processing capability
-        - Robust to different speakers and languages
-        """)
-        
-        if model_info:
-            st.json(model_info)
-    
-    # Batch processing section
-    with st.expander("📁 Batch Processing"):
-        st.write("""
-        **Want to analyze multiple files?**
-        
-        Currently, this app processes one file at a time. For batch processing:
-        1. Upload and analyze each file individually
-        2. Keep track of results manually
-        3. Consider using the model programmatically for large batches
-        
-        **Future Features:**
-        - Batch upload and processing
-        - Results export (CSV, JSON)
-        - Audio file management
-        - Historical analysis tracking
-        """)
-    
-    # API information
-    with st.expander("🔌 API Integration"):
-        st.write("""
-        **Want to integrate this into your application?**
-        
-        This model can be deployed as an API service:
-        
-        ```python
-        # Example API usage (conceptual)
-        import requests
-        
-        response = requests.post(
-            'http://your-api-endpoint/predict',
-            files={'audio': open('audio_file.wav', 'rb')}
-        )
-        
-        result = response.json()
-        print(f"Emotion: {result['emotion']}")
-        print(f"Confidence: {result['confidence']}")
-        ```
-        
-        **Contact for API access or custom deployment.**
-        """)
-    
-    # Footer
-    st.markdown("---")
-    st.markdown("""
-    <div style="text-align: center; color: #666; padding: 20px;">
-        <p>🤖 <strong>Emotion Recognition AI</strong> | Powered by Deep Learning</p>
-        <p>Built with TensorFlow, Streamlit, and Librosa</p>
-        <p>Model trained on emotional speech data with 75%+ accuracy</p>
-        <p style="font-size: 0.8em; margin-top: 10px;">
-            For technical support or custom deployments, contact the development team.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+            finally:
+                # Clean up
+                if os.path.exists(tmp_file_path):
+                    os.unlink(tmp_file_path)
 
-if __name__ == "__main__":
-    main()
+# Instructions
+st.markdown("---")
+st.markdown("""
+**Instructions:**
+1. Upload a WAV audio file
+2. Click 'Predict Emotion'
+3. See the predicted emotion and confidence
+
+**Supported Emotions:**
+😊 Happy | 😢 Sad | 😠 Angry | 😨 Fearful | 😲 Surprised | 🤢 Disgust | 😐 Neutral | 😌 Calm
+""")
